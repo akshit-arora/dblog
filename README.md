@@ -1,6 +1,6 @@
 # Laravel DB Log Library
 
-![GitHub](https://img.shields.io/github/license/akshit-arora/dblog)
+![GitHub](https://img.shields.io/github/license/akshit-arora/dblog?logoColor=green)
 
 A simple Laravel library for devs to log your heavy queries bifurcated by the time taken in your application.
 
@@ -12,6 +12,10 @@ A simple Laravel library for devs to log your heavy queries bifurcated by the ti
 ## Features
 - Bifurcates the logs datewise so that you can know on what day was your application slow.
 - You can also bifurcate the logs based on time taken by the query.
+
+## Install
+
+    composer require akshitarora/dblog
 
 ## Log structure
 
