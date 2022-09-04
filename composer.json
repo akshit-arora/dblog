@@ -1,0 +1,26 @@
+{
+    "name": "akshitarora/dblog",
+    "description": "Tool to log heavy database queries in the Laravel application",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Akshit Arora",
+            "email": "akshit.arora0907@gmail.com"
+        }
+    ],
+    "minimum-stability": "stable",
+    "autoload": {
+        "psr-4": {
+            "AkshitArora\\DbLog\\": "src/"
+        }
+    },
+    "require": {},
+    "extra": {
+        "laravel": {
+            "providers": [
+                "AkshitArora\\DbLog\\DbLogServiceProvider"
+            ]
+        }
+    }
+}
