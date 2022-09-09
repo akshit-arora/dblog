@@ -17,6 +17,10 @@ A simple Laravel library for devs to log your heavy queries bifurcated by the ti
 
     composer require akshitarora/dblog
 
+Add the ServiceProvider in `app.php`
+
+    AkshitArora\DbLog\DbLogServiceProvider::class,
+
 ## Log structure
 
 `[database-name] [time-taken s] SELECT SQL QUERY WHERE PARAMETERS='VALUE' || Path METHOD: /slow/page/here`
