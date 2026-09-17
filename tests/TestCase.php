@@ -49,14 +49,18 @@ class TestCase extends BaseTestCase
         $app['config']->set('app.key', 'base64:f9st7J/mtBN80JbMjXFbTLXitClvVSjCN3/y31yxYO0=');
 
         $app['config']->set('database.connections.testbench', [
-            'driver'   => env('DB_DRIVER'),
-            'host'     => env('DB_HOST'),
-            'port'     => env('DB_PORT'),
-            'username' => env('DB_USERNAME'),
-            'password' => env('DB_PASSWORD'),
-            'database' => env('DB_DATABASE'),
+            'driver'   => env('DB_DRIVER', 'sqlite'),
+            'host'     => env('DB_HOST', '127.0.0.1'),
+            'port'     => env('DB_PORT', '3306'),
+            'username' => env('DB_USERNAME', 'root'),
+            'password' => env('DB_PASSWORD', ''),
+            'database' => env('DB_DATABASE', ':memory:'),
             'prefix'   => '',
         ]);
+
+        $app['config']->set('dblog.enabled', true);
+        $app['config']->set('dblog.folder_path', storage_path('app/dblogs'));
+        $app['config']->set('dblog.query_slower_than', 0);
     }
 
     protected function getPackageProviders($app)

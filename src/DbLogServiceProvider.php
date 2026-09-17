@@ -3,7 +3,6 @@
 namespace AkshitArora\DbLog;
 
 use Illuminate\Database\Events\QueryExecuted;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
 
 class DbLogServiceProvider extends ServiceProvider
@@ -37,59 +36,117 @@ class DbLogServiceProvider extends ServiceProvider
         }
 
         $this->app['events']->listen(QueryExecuted::class, function (QueryExecuted $query) use ($appConfig) {
+            // Check if current route is ignored
+            if ($this->shouldIgnoreRoute($appConfig->get('dblog.ignore_routes', []))) {
+                return;
+            }
+
             $timeInSeconds = $query->time / 1000;
 
             if ($timeInSeconds < $appConfig->get('dblog.query_slower_than', 0)) {
                 return;
             }
 
-            $sqlWithPlaceholders = str_replace(['%', '?', '%s%s'], ['%%', '%s', '?'], $query->sql);
+            // Sanitize or Interpolate Bindings
+            if ($appConfig->get('dblog.sanitize_queries', true)) {
+                $realSql = $query->sql;
+            } else {
+                $sqlWithPlaceholders = str_replace(['%', '?', '%s%s'], ['%%', '%s', '?'], $query->sql);
+                $bindings = $query->connection->prepareBindings($query->bindings);
+                $pdo      = $query->connection->getPdo();
+                $realSql  = $sqlWithPlaceholders;
 
-            $bindings = $query->connection->prepareBindings($query->bindings);
-            $pdo      = $query->connection->getPdo();
-            $realSql  = $sqlWithPlaceholders;
-            $duration = $this->formatDuration($timeInSeconds);
-
-            if (count($bindings) > 0) {
-                $realSql = vsprintf($sqlWithPlaceholders, array_map([$pdo, 'quote'], $bindings));
+                if (count($bindings) > 0 && $pdo) {
+                    $realSql = vsprintf($sqlWithPlaceholders, array_map([$pdo, 'quote'], $bindings));
+                }
             }
 
-            $log = sprintf('[%s] [%s] %s || Path %s: %s', $query->connection->getDatabaseName(), $duration, $realSql,
-                request()->method(), request()->getRequestUri());
-
-            $disk = $appConfig->get('dblog.log_storage', 'local');
-
-            // Set the file name
-            $fileName = date('Ymd');
-
-            if(is_array($appConfig->get('dblog.time_brackets'))) {
-                $timeBrackets = $appConfig->get('dblog.time_brackets');
-
-                sort($timeBrackets);
-
-                $lessThanTime = 0;
-                $moreThanTime = 0;
-
-                foreach($timeBrackets as $timeBracket) {
-                    $moreThanTime = $timeBracket;
-
-                    if($timeInSeconds < $timeBracket) {
-                        $fileName .= '_' . $lessThanTime . '_' . $moreThanTime . 's';
+            // Get Request Context
+            $method = app()->runningInConsole() ? 'CLI' : request()->method();
+            $path = app()->runningInConsole() ? 'Command' : request()->getRequestUri();
+            
+            // Get Source (File/Line)
+            $source = null;
+            if ($appConfig->get('dblog.track_sources', true)) {
+                $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+                foreach ($backtrace as $trace) {
+                    if (isset($trace['file']) && !str_contains($trace['file'], 'vendor/') && !str_contains($trace['file'], 'DbLogServiceProvider')) {
+                        $source = sprintf('%s:%s', $trace['file'], $trace['line']);
                         break;
-                    }
-
-                    $lessThanTime = $timeBracket;
-
-                    if($timeBracket == end($timeBrackets)) {
-                        $fileName .= '_' . $lessThanTime . 's_and_above';
                     }
                 }
             }
 
-            $logFile = $appConfig->get('dblog.folder_path').'/'. $fileName .'.log';
+            $log = sprintf(
+                '[database:%s] %s (%.2f s) [%s %s]',
+                $query->connection->getDatabaseName(),
+                $realSql,
+                $timeInSeconds,
+                $method,
+                $path
+            );
 
-            Storage::disk($disk)->append($logFile, $log);
+            if ($source !== null) {
+                $log .= sprintf(' [source: %s]', $source);
+            }
+
+            $fileName = 'slow_query_' . date('Ymd') . $this->timeBracketSuffix(
+                $timeInSeconds,
+                $appConfig->get('dblog.time_brackets')
+            ) . '.log';
+
+            $folderPath = $appConfig->get('dblog.folder_path') ?? storage_path('logs/dblog');
+            LogWriter::append($folderPath, $fileName, $log);
         });
+    }
+
+    /**
+     * Return the filename suffix for the duration bracket, when configured.
+     */
+    private function timeBracketSuffix(float $duration, mixed $timeBrackets): string
+    {
+        if (!is_array($timeBrackets) || $timeBrackets === []) {
+            return '';
+        }
+
+        sort($timeBrackets);
+        $lowerBound = 0;
+
+        foreach ($timeBrackets as $upperBound) {
+            if ($duration < $upperBound) {
+                return '_' . $lowerBound . '_' . $upperBound . 's';
+            }
+
+            $lowerBound = $upperBound;
+        }
+
+        return '_' . $lowerBound . 's_and_above';
+    }
+
+    /**
+     * Determine if the request has a URI that should be ignored.
+     *
+     * @param  string  $requestPath
+     * @param  array  $ignoredRoutes
+     * @return bool
+     */
+    protected function shouldIgnoreRoute(array $ignoredRoutes)
+    {
+        if (app()->runningInConsole()) {
+            return false;
+        }
+
+        foreach ($ignoredRoutes as $route) {
+            if ($route !== '/') {
+                $route = trim($route, '/');
+            }
+            
+            if (request()->is($route)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -100,24 +157,6 @@ class DbLogServiceProvider extends ServiceProvider
     public function requestHasTrigger($trigger)
     {
         return false !== getenv($trigger) || \request()->hasHeader($trigger) || \request()->has($trigger) || \request()->hasCookie($trigger);
-    }
-
-    /**
-     * Format duration.
-     *
-     * @param  float  $seconds
-     *
-     * @return string
-     */
-    private function formatDuration($seconds)
-    {
-        if ($seconds < 0.001) {
-            return round($seconds * 1000000).'μs';
-        } elseif ($seconds < 1) {
-            return round($seconds * 1000, 2).'ms';
-        }
-
-        return round($seconds, 2).'s';
     }
 
     public function register()
